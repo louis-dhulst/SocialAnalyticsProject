@@ -5,6 +5,9 @@ library(tibble)
 library(ggplot2)
 library(gridExtra)
 library(car)
+library(dplyr)
+library(tidyr)
+
 ####### Basic Data Exploration and Preparation ####### 
 social_data <- read.csv("cdf_train.csv")
 View(social_data)
@@ -93,10 +96,13 @@ social_data_copy_v2 <- data.frame(social_data)
 
 #Get class types of columns 
 class_type <- as.data.frame(sapply(social_data, class))
+
 #Make sure class type makes sense
-#Post.Views, Total.Views are characters when should be int: convert
+#Post.Views, Total.Views, Likes.at.Posting are characters when should be int: convert
 social_data$Post.Views <- as.integer(social_data$Post.Views)
 social_data$Total.Views <- as.integer(social_data$Total.Views)
+social_data$Likes.at.Posting <- as.integer(social_data$Likes.at.Posting)
+
 #WC, Dash is character when should be numeric: convert
 social_data$WC <- as.numeric(social_data$WC)
 social_data$Dash <- as.numeric(social_data$Dash)
@@ -121,17 +127,24 @@ drop_cols <- c("Facebook.Id","Page.Admin.Top.Country","Page.Description","URL",
 social_data <- social_data[,!(names(social_data) %in% drop_cols)]
 
 
-## Save the dataset as .csv
-write.csv(social_data, "cleaned_social_data.csv")
+#Get class types of columns 
+class_type <- as.data.frame(sapply(social_data, class))
 
+###Convert character variables to factor
+social_data = social_data %>% 
+  mutate_at(vars(Page.Name,User.Name,Page.Category,Type,Sponsor.Name,Sponsor.Category),
+            as.factor)
 
+##### Get Page.Created into two columns: Page.Created.Date and Page.Created.Time
+social_data = social_data %>%
+  separate(Page.Created, c("Page.Created.Date", "Page.Created.Time"), " ", remove=FALSE)
 
 ### Separate main dataframe column index into vectors 
 colnames(social_data)
 #CrowdTangle: variables 1 through 39
-crowdtangle_vars <- c(1:26)
+crowdtangle_vars <- c(1:28)
 #LIWC2015: variables 40 through 122
-liwc_vars <- c(27:119)
+liwc_vars <- c(29:121)
 
 #Create dataframes for crowdtangle data and liwc data
 crowdtangle_data <- social_data[,crowdtangle_vars]
@@ -152,6 +165,10 @@ liwc_num_vars <- unlist(lapply(liwc_data, is.numeric))
 liwc_factor_vars <- unlist(lapply(liwc_data, is.factor))  
 
 
+## Save the dataset as .csv
+write.csv(social_data, "cleaned_social_data.csv")
+
+
 ###### Data Visualization ########
 
 #### Histograms #### 
@@ -165,7 +182,6 @@ histplot = function (data, column) {
 #List of histograms for CrowdTangle numeric variables
 crowdtangle_numhist <- lapply(colnames(crowdtangle_data[,crowdtangle_num_vars]), histplot, data = crowdtangle_data[,crowdtangle_num_vars])
 names(crowdtangle_numhist) <- colnames(crowdtangle_data[,crowdtangle_num_vars])
-
 #Some SO magic to get a grid arranged
 n <- length(crowdtangle_numhist)
 nCol <- floor(sqrt(n))
@@ -177,11 +193,17 @@ summary(crowdtangle_data[,crowdtangle_num_vars])
 #List of histograms for log of CrowdTangle numeric variables
 crowdtangle_numhist.log <- lapply(colnames(log(crowdtangle_data[,crowdtangle_num_vars])), histplot, data = log(crowdtangle_data[,crowdtangle_num_vars]))
 names(crowdtangle_numhist.log) <- colnames(log(crowdtangle_data[,crowdtangle_num_vars]))
-
 #Some SO magic to get a grid arranged
 n <- length(crowdtangle_numhist.log)
 nCol <- floor(sqrt(n))
 do.call("grid.arrange", c(crowdtangle_numhist.log, ncol=nCol))
 
 
+#List of histograms for LIWC numeric variables
+liwc_numhist <- lapply(colnames(liwc_data[,liwc_num_vars]), histplot, data = liwc_data[,liwc_num_vars])
+names(liwc_numhist) <- colnames(liwc_data[,liwc_num_vars])
+#Some SO magic to get a grid arranged
+n <- length(liwc_numhist)
+nCol <- floor(sqrt(n))
+do.call("grid.arrange", c(liwc_numhist, ncol=nCol))
 
