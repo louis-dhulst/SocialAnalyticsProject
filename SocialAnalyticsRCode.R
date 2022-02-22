@@ -4,7 +4,7 @@ library("data.table")
 library(tibble)
 library(ggplot2)
 library(gridExtra)
-
+library(car)
 ####### Basic Data Exploration and Preparation ####### 
 social_data <- read.csv("cdf_train.csv")
 View(social_data)
@@ -33,6 +33,10 @@ social_data$Haha <- as.integer(social_data$Haha)
 
 #rowSums
 social_data$Total.Interactions <- rowSums(social_data[,c("Likes","Comments","Shares","Love","Wow","Haha","Sad","Angry","Care")])
+
+### Create engagement column: Engagement = Likes + Shares + Comments
+social_data <- add_column(social_data, Engagement = c(rep(0, nrow(social_data))), .after = 13)
+social_data$Engagement <- rowSums(social_data[,c("Likes","Comments","Shares")])
 
 ### Check missing values again
 missing_values <- as.data.frame(colSums(is.na(social_data)))
@@ -79,17 +83,13 @@ missing_values$missing_freq <- colSums(is.na(social_data))/nrow(social_data)*100
 #Drop rows with missing values
 social_data <- na.omit(social_data)
 
-#Summary
-summary(social_data)
 
 
 
-### Separate main dataframe column index into vectors 
-colnames(social_data)
-#CrowdTangle: variables 1 through 39
-crowdtangle_vars <- c(1:32)
-#LIWC2015: variables 40 through 122
-liwc_vars <- c(32:126)
+#Cast dataset back to dataframe 
+social_data <- data.frame(social_data)
+#Make 2nd copy of dataset
+social_data_copy_v2 <- data.frame(social_data)
 
 #Get class types of columns 
 class_type <- as.data.frame(sapply(social_data, class))
@@ -104,33 +104,52 @@ social_data$Dash <- as.numeric(social_data$Dash)
 #3 NAs introduced by coercion when casting: drop them
 social_data <- na.omit(social_data)
 
-#Numeric variables
-num_vars <- unlist(lapply(social_data, is.numeric))  
-#Factor variables
-factor_vars <- unlist(lapply(social_data, is.factor))
 
-#Cast dataset back to dataframe 
-social_data <- data.frame(social_data)
-#Make 2nd copy of dataset
-social_data_copy_v2 <- data.frame(social_data)
-
-#Get dataset with only important variables: drop things like Ids, Names
-#May have to drop categorical variables with too high cardinality: encoding different than one-hot is out of scope of course
+#Get dataset with only important variables
+nrow(table(social_data$Page.Name)) #Cardinality: 256, keep column
 nrow(table(social_data$Page.Category)) #Cardinality: 21, keep column
+nrow(table(social_data$User.Name)) #Cardinality: 258, keep column
 nrow(table(social_data$Page.Admin.Top.Country)) #Cardinality: 1, drop column
 nrow(table(social_data$Type)) #Cardinality: 9, keep column
-nrow(table(social_data$Sponsor.Name)) #Cardinality: 5398, drop column
+nrow(table(social_data$Sponsor.Name)) #Cardinality: 5398, keep column
 nrow(table(social_data$train_test)) #Cardinality: 1, drop column
 
 #Keep Page.Created, Post.Created and Post.Created.Time: can perhaps make a feature out of these two columns
 
-drop_cols <- c("Page.Name","User.Name","Facebook.Id","Page.Admin.Top.Country","Page.Description","URL",
-               "Message","Link","Sponsor.Id","Sponsor.Name","train_test")
+drop_cols <- c("Facebook.Id","Page.Admin.Top.Country","Page.Description","URL",
+               "Message","Link","Sponsor.Id","train_test")
 social_data <- social_data[,!(names(social_data) %in% drop_cols)]
 
-## Save the dataset as .csv
-write.csv("cleaned_social_data.csv")
 
+## Save the dataset as .csv
+write.csv(social_data, "cleaned_social_data.csv")
+
+
+
+### Separate main dataframe column index into vectors 
+colnames(social_data)
+#CrowdTangle: variables 1 through 39
+crowdtangle_vars <- c(1:26)
+#LIWC2015: variables 40 through 122
+liwc_vars <- c(27:119)
+
+#Create dataframes for crowdtangle data and liwc data
+crowdtangle_data <- social_data[,crowdtangle_vars]
+liwc_data <- social_data[,liwc_vars]
+
+#Numeric variables for main dataframe
+num_vars <- unlist(lapply(social_data, is.numeric))  
+#Factor variables for main dataframe
+factor_vars <- unlist(lapply(social_data, is.factor))
+
+#Numeric variables for crowdtangle dataframe
+crowdtangle_num_vars <- unlist(lapply(crowdtangle_data, is.numeric))  
+#Factor variables for crowdtangle dataframe
+crowdtangle_factor_vars <- unlist(lapply(crowdtangle_data, is.factor))  
+
+#Numeric variables for liwc dataframe
+liwc_num_vars <- unlist(lapply(liwc_data, is.numeric))  
+liwc_factor_vars <- unlist(lapply(liwc_data, is.factor))  
 
 
 ###### Data Visualization ########
@@ -143,10 +162,26 @@ histplot = function (data, column) {
     xlab(column) 
 }
 
-numhistplots <- lapply(colnames(social_data[,num_vars]), histplot, data = social_data[,num_vars])
-names(numhistplots) <- colnames(social_data[,num_vars])
+#List of histograms for CrowdTangle numeric variables
+crowdtangle_numhist <- lapply(colnames(crowdtangle_data[,crowdtangle_num_vars]), histplot, data = crowdtangle_data[,crowdtangle_num_vars])
+names(crowdtangle_numhist) <- colnames(crowdtangle_data[,crowdtangle_num_vars])
 
 #Some SO magic to get a grid arranged
-n <- length(numhistplots)
+n <- length(crowdtangle_numhist)
 nCol <- floor(sqrt(n))
-do.call("grid.arrange", c(numhistplots, ncol=nCol))
+do.call("grid.arrange", c(crowdtangle_numhist, ncol=nCol))
+
+#Histograms aren't very useful: are all 1 bars. Use summary to check min/max
+summary(crowdtangle_data[,crowdtangle_num_vars])
+
+#List of histograms for log of CrowdTangle numeric variables
+crowdtangle_numhist.log <- lapply(colnames(log(crowdtangle_data[,crowdtangle_num_vars])), histplot, data = log(crowdtangle_data[,crowdtangle_num_vars]))
+names(crowdtangle_numhist.log) <- colnames(log(crowdtangle_data[,crowdtangle_num_vars]))
+
+#Some SO magic to get a grid arranged
+n <- length(crowdtangle_numhist.log)
+nCol <- floor(sqrt(n))
+do.call("grid.arrange", c(crowdtangle_numhist.log, ncol=nCol))
+
+
+
