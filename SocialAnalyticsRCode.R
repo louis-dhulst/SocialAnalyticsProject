@@ -244,6 +244,9 @@ write.csv(test_data, "test_data.csv")
 train_data <- read.csv("training_data.csv")
 test_data <- read.csv("test_data.csv")
 
+##### Get Page.Created into two columns: Page.Created.Date and Page.Created.Time
+social_data = social_data %>%
+  separate(Page.Created, c("Page.Created.Date", "Page.Created.Time"), " ", remove=FALSE)
 
 ### Separate main dataframe column index into vectors 
 colnames(social_data)
@@ -271,6 +274,11 @@ liwc_num_vars <- unlist(lapply(liwc_data, is.numeric))
 liwc_factor_vars <- unlist(lapply(liwc_data, is.factor))  
 
 
+## Save the dataset as .csv
+write.csv(social_data, "cleaned_social_data.csv")
+
+
+###### Data Visualization ########
 
 #### Histograms #### 
 #Function to create a list of histograms
