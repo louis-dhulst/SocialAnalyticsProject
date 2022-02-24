@@ -1,10 +1,16 @@
 ####### Imports ######
-#install.packages("data.table")           
+#install.packages("data.table") 
+install.packages('cattonum')
 library("data.table")
 library(tibble)
 library(ggplot2)
 library(gridExtra)
 library(car)
+library(dplyr)
+library(tidyr)
+library(chron)
+library(cattonum)
+
 ####### Basic Data Exploration and Preparation ####### 
 social_data <- read.csv("cdf_train.csv")
 View(social_data)
@@ -72,9 +78,9 @@ social_data$Sponsor.Id[is.na(social_data$Sponsor.Id)] <- 0
 social_data <- add_column(social_data, hasSponsor = c(rep(0, nrow(social_data))), .after = 28)
 social_data$hasSponsor[social_data$Sponsor.Id != 0] <- 1
 
-#Sponsor.Name & Sponsor.Category = 0 when Sponsor.Id = 0
-social_data$Sponsor.Name[social_data$Sponsor.Id == 0] <- 0
-social_data$Sponsor.Category[social_data$Sponsor.Id == 0] <- 0
+#Sponsor.Name & Sponsor.Category = 'No Sponsor when Sponsor.Id = 0
+social_data$Sponsor.Name[social_data$Sponsor.Id == 0] <- 'No Sponsor'
+social_data$Sponsor.Category[social_data$Sponsor.Id == 0] <- 'No Sponsor'
 
 ### Check missing values again
 missing_values <- as.data.frame(colSums(is.na(social_data)))
@@ -93,10 +99,13 @@ social_data_copy_v2 <- data.frame(social_data)
 
 #Get class types of columns 
 class_type <- as.data.frame(sapply(social_data, class))
+
 #Make sure class type makes sense
-#Post.Views, Total.Views are characters when should be int: convert
+#Post.Views, Total.Views, Likes.at.Posting are characters when should be int: convert
 social_data$Post.Views <- as.integer(social_data$Post.Views)
 social_data$Total.Views <- as.integer(social_data$Total.Views)
+social_data$Likes.at.Posting <- as.integer(social_data$Likes.at.Posting)
+
 #WC, Dash is character when should be numeric: convert
 social_data$WC <- as.numeric(social_data$WC)
 social_data$Dash <- as.numeric(social_data$Dash)
@@ -121,17 +130,127 @@ drop_cols <- c("Facebook.Id","Page.Admin.Top.Country","Page.Description","URL",
 social_data <- social_data[,!(names(social_data) %in% drop_cols)]
 
 
-## Save the dataset as .csv
-write.csv(social_data, "cleaned_social_data.csv")
+#Get class types of columns 
+class_type <- as.data.frame(sapply(social_data, class))
 
+###Convert character variables to factor
+social_data = social_data %>% 
+  mutate_at(vars(Page.Name,User.Name,Page.Category,Type,Sponsor.Name,Sponsor.Category),
+            as.factor)
+
+##### Get Page.Created into two columns: Page.Created.Date and Page.Created.Time
+social_data = social_data %>%
+  separate(Page.Created, c("Page.Created.Date", "Page.Created.Time"), " ", remove=FALSE)
+
+
+
+###### Feature Engineering ######
+
+###### Data Visualization ########
+
+#Create factor variable with day of the week for post created 
+social_data$Post.Created.Day <- weekdays(as.Date(social_data$Post.Created.Date))
+#Create binary column for weekend: 1 if 'Saturday' or 'Sunday', 0 else
+social_data$Post.Created.Weekend <- ifelse((social_data$Post.Created.Day == 'Saturday' |
+                                              social_data$Post.Created.Day == 'Sunday' ), 1, 0)
+
+# Create dummy variables based on time intervals
+
+#First cast Post.Created.Time to chron time 
+social_data$Post.Created.Time <- chron(times = social_data$Post.Created.Time)
+
+#Then: define bins and dummies for those bins
+#Bin 1: from 22:00:01 to 06:00:00 -> Post.Created.TimeNight
+social_data$Post.Created.TimeNight <- ifelse((social_data$Post.Created.Time >= '22:00:01' |
+                                                social_data$Post.Created.Time <= '06:00:00'), 1, 0)
+
+#Bin 2: from 06:00:01 to 10:00:00 -> Post.Created.TimeMorning
+social_data$Post.Created.TimeMorning <- ifelse((social_data$Post.Created.Time >= '06:00:01' &
+                                                 social_data$Post.Created.Time <= '10:00:00'), 1, 0)
+
+#Bin 3: from 10:00:01 to 14:00:00 -> Post.Created.TimeMidday
+social_data$Post.Created.TimeMidday <- ifelse((social_data$Post.Created.Time >= '10:00:01' &
+                                                  social_data$Post.Created.Time <= '14:00:00'), 1, 0)
+
+#Bin 4: from 14:00:01 to 18:00:00 -> Post.Created.TimeAfternoon
+social_data$Post.Created.TimeAfternoon <- ifelse((social_data$Post.Created.Time >= '14:00:01' &
+                                                 social_data$Post.Created.Time <= '18:00:00'), 1, 0)
+
+#Bin 5: from 18:00:01 to 22:00:00 -> Post.Created.TimeEvening
+social_data$Post.Created.TimeEvening <- ifelse((social_data$Post.Created.Time >= '18:00:01' &
+                                                    social_data$Post.Created.Time <= '22:00:00'), 1, 0)
+
+
+#Encode high cardinality features using mean encoding
+
+nrow(table(social_data$Page.Name)) #Cardinality: 256, encode
+nrow(table(social_data$Page.Category)) #Cardinality: 21, encode
+nrow(table(social_data$User.Name)) #Cardinality: 258, encode
+nrow(table(social_data$Type)) #Cardinality: 9, keep as Factor variable
+nrow(table(social_data$Sponsor.Name)) #Cardinality: 5398, encode
+nrow(table(social_data$Sponsor.Category)) #Cardinality: 682, encode
+
+#Get idea of distribution for those features
+
+sort(table(social_data$Page.Name)) 
+table(table(social_data$Page.Name) <= 15)
+#Rename pages with less than 15 rows to 'Other': 75 pages, 516 rows
+levels(social_data$Page.Name)[table(social_data$Page.Name) <= 15] <- 'Other'
+
+sort(table(social_data$Page.Category)) 
+table(table(social_data$Page.Category) <= 10)
+#Rename categories with less than 10 rows to 'Other': 4 categories, 12 rows
+levels(social_data$Page.Category)[table(social_data$Page.Category) <= 10] <- 'Other'
+
+sort(table(social_data$User.Name)) 
+table(table(social_data$User.Name) <= 9)
+#Rename users with less than 9 rows to 'Other': 52 users, 210 rows
+levels(social_data$User.Name)[table(social_data$User.Name) <= 9] <- 'Other'
+
+SponsorNameFreq <- sort(table(social_data$Sponsor.Name), decreasing = TRUE) 
+table(table(social_data$Sponsor.Name) <= 3)
+#Rename sponsors with less than 3 rows to 'Other': 1877 sponsors, 3797 rows
+levels(social_data$Sponsor.Name)[table(social_data$Sponsor.Name) <= 3] <- 'Other'
+
+sort(table(social_data$Sponsor.Category)) 
+table(table(social_data$Sponsor.Category) <= 5)
+#Rename categories with less than 5 rows to 'Other': 134 categories, 386 rows
+levels(social_data$Sponsor.Category)[table(social_data$Sponsor.Category) <= 5] <- 'Other'
+
+#Reposition columns to keep definite split between CrowdTangle and LIWC data
+colnames(social_data)
+social_data <- social_data[,c(1:28, 122:128, 29:121)]
+
+### Split dataset into train and test in order to perform leave-one-out encoding
+set.seed(123)
+
+train_ind <- sample(seq_len(nrow(social_data)), size = smp_size)
+
+train_data <- social_data[train_ind, ]
+test_data <- social_data[-train_ind, ]
+
+## 75% of the sample size
+smp_size <- floor(0.75 * nrow(social_data))
+
+### Leave one out encoding for categorical features with high cardinality
+catto_loo(train_data, response = Engagement, test = test_data)
+
+## Save the train and test dataset as .csv
+write.csv(train_data, "training_data.csv")
+write.csv(test_data, "test_data.csv")
+
+########### Finished Data Cleaning ################
+#Open cleaned dataset
+train_data <- read.csv("training_data.csv")
+test_data <- read.csv("test_data.csv")
 
 
 ### Separate main dataframe column index into vectors 
 colnames(social_data)
 #CrowdTangle: variables 1 through 39
-crowdtangle_vars <- c(1:26)
+crowdtangle_vars <- c(1:28)
 #LIWC2015: variables 40 through 122
-liwc_vars <- c(27:119)
+liwc_vars <- c(29:121)
 
 #Create dataframes for crowdtangle data and liwc data
 crowdtangle_data <- social_data[,crowdtangle_vars]
@@ -152,7 +271,6 @@ liwc_num_vars <- unlist(lapply(liwc_data, is.numeric))
 liwc_factor_vars <- unlist(lapply(liwc_data, is.factor))  
 
 
-###### Data Visualization ########
 
 #### Histograms #### 
 #Function to create a list of histograms
@@ -165,7 +283,6 @@ histplot = function (data, column) {
 #List of histograms for CrowdTangle numeric variables
 crowdtangle_numhist <- lapply(colnames(crowdtangle_data[,crowdtangle_num_vars]), histplot, data = crowdtangle_data[,crowdtangle_num_vars])
 names(crowdtangle_numhist) <- colnames(crowdtangle_data[,crowdtangle_num_vars])
-
 #Some SO magic to get a grid arranged
 n <- length(crowdtangle_numhist)
 nCol <- floor(sqrt(n))
@@ -177,11 +294,17 @@ summary(crowdtangle_data[,crowdtangle_num_vars])
 #List of histograms for log of CrowdTangle numeric variables
 crowdtangle_numhist.log <- lapply(colnames(log(crowdtangle_data[,crowdtangle_num_vars])), histplot, data = log(crowdtangle_data[,crowdtangle_num_vars]))
 names(crowdtangle_numhist.log) <- colnames(log(crowdtangle_data[,crowdtangle_num_vars]))
-
 #Some SO magic to get a grid arranged
 n <- length(crowdtangle_numhist.log)
 nCol <- floor(sqrt(n))
 do.call("grid.arrange", c(crowdtangle_numhist.log, ncol=nCol))
 
 
+#List of histograms for LIWC numeric variables
+liwc_numhist <- lapply(colnames(liwc_data[,liwc_num_vars]), histplot, data = liwc_data[,liwc_num_vars])
+names(liwc_numhist) <- colnames(liwc_data[,liwc_num_vars])
+#Some SO magic to get a grid arranged
+n <- length(liwc_numhist)
+nCol <- floor(sqrt(n))
+do.call("grid.arrange", c(liwc_numhist, ncol=nCol))
 
