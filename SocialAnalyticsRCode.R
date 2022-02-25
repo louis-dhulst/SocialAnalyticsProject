@@ -1,6 +1,5 @@
 ####### Imports ######
-#install.packages("data.table") 
-#install.packages('h2o')
+#install.packages("glmnet")           
 library("data.table")
 library(tibble)
 library(ggplot2)
@@ -8,9 +7,17 @@ library(gridExtra)
 library(car)
 library(dplyr)
 library(tidyr)
+library(mlbench)
+library(caret)
+library(cattonum)
 library(chron)
 library(h2o)
+library(glmnet)  
+library(psych)
+library(Hmisc)
+library(stargazer)
 
+####### Basic Data Exploration and Preparation ####### 
 ####### Basic Data Exploration and Preparation ####### 
 social_data <- read.csv("cdf_train.csv")
 View(social_data)
@@ -32,7 +39,7 @@ missing_values$missing_freq <- colSums(is.na(social_data))/nrow(social_data)*100
 #First need to drop rows with missing values in the RHS columns
 #Use setDT to convert dataframe to data.table
 social_data <- na.omit(setDT(social_data), 
-                            cols=c("Likes","Comments","Shares","Love","Wow","Haha","Sad","Angry","Care"))
+                       cols=c("Likes","Comments","Shares","Love","Wow","Haha","Sad","Angry","Care"))
 
 #Class_type shows "Haha" is of class 'character', cast to int
 social_data$Haha <- as.integer(social_data$Haha)
@@ -166,19 +173,19 @@ social_data$Post.Created.TimeNight <- ifelse((social_data$Post.Created.Time >= '
 
 #Bin 2: from 06:00:01 to 10:00:00 -> Post.Created.TimeMorning
 social_data$Post.Created.TimeMorning <- ifelse((social_data$Post.Created.Time >= '06:00:01' &
-                                                 social_data$Post.Created.Time <= '10:00:00'), 1, 0)
+                                                  social_data$Post.Created.Time <= '10:00:00'), 1, 0)
 
 #Bin 3: from 10:00:01 to 14:00:00 -> Post.Created.TimeMidday
 social_data$Post.Created.TimeMidday <- ifelse((social_data$Post.Created.Time >= '10:00:01' &
-                                                  social_data$Post.Created.Time <= '14:00:00'), 1, 0)
+                                                 social_data$Post.Created.Time <= '14:00:00'), 1, 0)
 
 #Bin 4: from 14:00:01 to 18:00:00 -> Post.Created.TimeAfternoon
 social_data$Post.Created.TimeAfternoon <- ifelse((social_data$Post.Created.Time >= '14:00:01' &
-                                                 social_data$Post.Created.Time <= '18:00:00'), 1, 0)
+                                                    social_data$Post.Created.Time <= '18:00:00'), 1, 0)
 
 #Bin 5: from 18:00:01 to 22:00:00 -> Post.Created.TimeEvening
 social_data$Post.Created.TimeEvening <- ifelse((social_data$Post.Created.Time >= '18:00:01' &
-                                                    social_data$Post.Created.Time <= '22:00:00'), 1, 0)
+                                                  social_data$Post.Created.Time <= '22:00:00'), 1, 0)
 
 
 #Encode high cardinality features using mean encoding
@@ -226,12 +233,11 @@ social_data <- social_data[,c(1:28, 122:128, 29:121)]
 social_data$Post.Created.Time <- as.character(social_data$Post.Created.Time )
 
 #Save dataframe as csv
-write.csv(social_data, "cleaned_data_noencoding.csv")
+#write.csv(social_data, "cleaned_data_noencoding.csv")
 
 ### Split dataset into train and test in order to perform leave-one-out encoding
 #First cast dataframe to h2o frame
 h2o.init()
-
 h2o.social_data <- as.h2o(social_data)
 
 #Define seed
@@ -257,13 +263,13 @@ transformed_train <- h2o.transform(target_encoder, train_data, as_training = TRU
 transformed_test <- h2o.transform(target_encoder, test_data, noise = 0)
 
 ## Save the train and test h2o frames as .csv
-h2o.exportFile(transformed_train, "training_data.csv")
-h2o.exportFile(transformed_test, "test_data.csv")
+#h2o.exportFile(transformed_train, "training_data.csv")
+#h2o.exportFile(transformed_test, "test_data.csv")
 
 ########### Finished Data Cleaning ################
 #Open cleaned dataset
-train_data <- read.csv("training_data.csv")
-test_data <- read.csv("test_data.csv")
+#train_data <- read.csv("training_data.csv")
+#test_data <- read.csv("test_data.csv")
 
 
 ### Separate main dataframe column index into vectors 
@@ -328,4 +334,146 @@ names(liwc_numhist) <- colnames(liwc_data[,liwc_num_vars])
 n <- length(liwc_numhist)
 nCol <- floor(sqrt(n))
 do.call("grid.arrange", c(liwc_numhist, ncol=nCol))
+
+##########################################################################################
+#Feature Engineering and model building
+set.seed(143)
+train_data_all <- read.csv("training_data.csv")
+train_data = train_data[sample(nrow(train_data), 10000), ]
+test_data_all <- read.csv("test_data.csv")
+test_data = test_data[sample(nrow(test_data), 10000), ]
+
+# Removing irrelevant features
+model_data = train_data[, -c(1,11,12,13,15,16,17,19,20,21,22,23,24,25,26,27,28)]
+model_test = test_data[, -c(1,11,12,13,15,16,17,19,20,21,22,23,24,25,26,27,28)]
+
+# Removing rows with NA if any
+sum(is.na(model_data))
+model_data<-na.omit(model_data)
+
+# Adjusting columns
+model_data <- model_data %>%
+  select(Page.Name,User.Name,Page.Category,Sponsor.Name,Sponsor.Category,Engagement,Type,Post.Created.Day, everything())
+
+model_test <- model_test %>%
+  select(Page.Name,User.Name,Page.Category,Sponsor.Name,Sponsor.Category,Engagement,Type,Post.Created.Day, everything())
+
+#################################################################
+# Removing useless features using correlation matrix
+# ensure the results are repeatable
+set.seed(143)
+# calculate correlation matrix
+correlationMatrix <- cor(model_data[,9:123])
+# summarize the correlation matrix
+print(correlationMatrix)
+# find attributes that are highly corrected (ideally >0.75)
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.50)
+# print indexes of highly correlated attributes
+print(highlyCorrelated)
+
+
+############ Don't run on whole data set #########################
+# Feature importance generalized linear model
+set.seed(143)
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+# train the model
+model <- train(Engagement~., data=model_data[,6:116], method="glm", preProcess="scale", trControl=control)
+# estimate variable importance
+importance <- varImp(model)
+# summarize importance
+print(importance)
+
+##################################################################
+# Step forward and backward elimination
+# Step 1: Define base intercept only model
+base.mod <- lm(Engagement ~ 1 , data=model_data[,6:116])  
+
+# Step 2: Full model with all predictors
+all.mod <- lm(Engagement ~ . , data= model_data[,6:116]) 
+
+# Step 3: Perform step-wise algorithm. direction='both' implies both forward and backward stepwise
+stepMod <- step(base.mod, scope = list(lower = base.mod, upper = all.mod), direction = "both", trace = 0, steps = 100)  
+
+# Step 4: Get the shortlisted variable.
+shortlistedVars <- names(unlist(stepMod[[1]])) 
+shortlistedVars <- shortlistedVars[!shortlistedVars %in% "(Intercept)"] # remove intercept
+
+# Show
+print(shortlistedVars)
+
+###############################################################################
+model_final <- lm(Engagement ~ Post.Views 
+                  +Total.Views.For.All.Crossposts 
+                  +Total.Views 
+                  +User.Name_te 
+                  +male 
+                  +female 
+                  , data = model_data)
+
+summary(model_final)
+stargazer(model_final, type="text", title="Regression Results",
+          dep.var.labels=c("Effects on Engangement"),
+          covariate.labels=c("Post views", "Total views for all crossposts","Total views", "User Name encoded","Male",
+                             "Female"),
+          omit.stat=c("LL","ser","f"), ci=TRUE, ci.level=0.90, single.row=TRUE, digits.extra = 2, digits = 2)
+
+str(model_data)
+str(model_test)
+
+# Accuracy check on test dataset
+sapply(model_test, class)
+predictions <- predict(model, model_test)
+data.frame(R2 = R2(predictions, model_test$Engagement), 
+           RMSE = RMSE(predictions, model_test$Engagement), 
+           MAE = MAE(predictions, model_test$Engagement))
+
+# Ridge regression
+y <- model_data %>% select(Engagement) %>% 
+  scale(center = TRUE, scale = FALSE) %>% 
+  as.matrix()
+
+X <- model_data %>% select(c(Post.Views
+                             ,Total.Views.For.All.Crossposts
+                             ,Total.Views
+                             ,User.Name_te
+                             ,male
+                             ,female)) %>% as.matrix()
+
+lambdas_to_try <- 10^seq(-3, 5, length.out = 100)
+
+ridge_cv <- cv.glmnet(X, y, alpha = 0, 
+                      lambda = lambdas_to_try,
+                      standardize = TRUE, nfolds = 10)
+plot(ridge_cv)
+
+
+################################################################################
+# Additional graphical analysis
+graph = rbind(train_data_all, test_data_all)
+
+# interactions vs weekdays
+dev.off()
+df = graph %>% group_by(Post.Created.Day)  %>%
+  summarise(No_interactions = sum(Total.Interactions)/1000000,
+            .groups = 'drop')
+
+ggplot(df, aes(y=No_interactions, x=Post.Created.Day)) + 
+  geom_bar(position="dodge",stat="identity")+
+  ggtitle("Interaction(in million) vs weekdays") +
+  ylab("No of Interaction (in million)")+
+  xlab("Post created day")+ theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+#
+dev.off()
+df2 = graph %>% group_by(Type)  %>%
+  summarise(sponsor = sum(hasSponsor),
+            .groups = 'drop')
+
+ggplot(df2, aes(y=sponsor, x=Type)) + 
+  geom_bar(position="dodge", stat="identity")+
+  ggtitle("Type vs No of sponsors") +
+  ylab("No of sponsors")+
+  xlab("Types")+ theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
 
