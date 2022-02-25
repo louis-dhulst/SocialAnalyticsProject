@@ -1,6 +1,6 @@
 ####### Imports ######
 #install.packages("data.table") 
-install.packages('cattonum')
+#install.packages('h2o')
 library("data.table")
 library(tibble)
 library(ggplot2)
@@ -9,7 +9,7 @@ library(car)
 library(dplyr)
 library(tidyr)
 library(chron)
-library(cattonum)
+library(h2o)
 
 ####### Basic Data Exploration and Preparation ####### 
 social_data <- read.csv("cdf_train.csv")
@@ -221,32 +221,50 @@ levels(social_data$Sponsor.Category)[table(social_data$Sponsor.Category) <= 5] <
 colnames(social_data)
 social_data <- social_data[,c(1:28, 122:128, 29:121)]
 
+
+#H2o does not recognize times format from chron: cast back to string
+social_data$Post.Created.Time <- as.character(social_data$Post.Created.Time )
+
+#Save dataframe as csv
+write.csv(social_data, "cleaned_data_noencoding.csv")
+
 ### Split dataset into train and test in order to perform leave-one-out encoding
-set.seed(123)
+#First cast dataframe to h2o frame
+h2o.init()
 
-train_ind <- sample(seq_len(nrow(social_data)), size = smp_size)
+h2o.social_data <- as.h2o(social_data)
 
-train_data <- social_data[train_ind, ]
-test_data <- social_data[-train_ind, ]
+#Define seed
+seed <- 123
 
-## 75% of the sample size
-smp_size <- floor(0.75 * nrow(social_data))
+#Split into train and test
+splits <- h2o.splitFrame(h2o.social_data, seed = seed, ratios = c(0.75))
+
+train_data <- splits[[1]]
+test_data <- splits[[2]]
 
 ### Leave one out encoding for categorical features with high cardinality
-catto_loo(train_data, response = Engagement, test = test_data)
+#Specify columns to encode
+cat_cols <- c('Page.Name','Page.Category','User.Name','Sponsor.Name','Sponsor.Category')
 
-## Save the train and test dataset as .csv
-write.csv(train_data, "training_data.csv")
-write.csv(test_data, "test_data.csv")
+target_encoder <- h2o.targetencoder(training_frame = train_data,
+                                    x = cat_cols, y = "Engagement",
+                                    data_leakage_handling = 'LeaveOneOut',
+                                    noise = 0.1,
+                                    seed = seed)
+
+transformed_train <- h2o.transform(target_encoder, train_data, as_training = TRUE)
+transformed_test <- h2o.transform(target_encoder, test_data, noise = 0)
+
+## Save the train and test h2o frames as .csv
+h2o.exportFile(transformed_train, "training_data.csv")
+h2o.exportFile(transformed_test, "test_data.csv")
 
 ########### Finished Data Cleaning ################
 #Open cleaned dataset
 train_data <- read.csv("training_data.csv")
 test_data <- read.csv("test_data.csv")
 
-##### Get Page.Created into two columns: Page.Created.Date and Page.Created.Time
-social_data = social_data %>%
-  separate(Page.Created, c("Page.Created.Date", "Page.Created.Time"), " ", remove=FALSE)
 
 ### Separate main dataframe column index into vectors 
 colnames(social_data)
@@ -274,11 +292,6 @@ liwc_num_vars <- unlist(lapply(liwc_data, is.numeric))
 liwc_factor_vars <- unlist(lapply(liwc_data, is.factor))  
 
 
-## Save the dataset as .csv
-write.csv(social_data, "cleaned_social_data.csv")
-
-
-###### Data Visualization ########
 
 #### Histograms #### 
 #Function to create a list of histograms
