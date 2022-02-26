@@ -101,8 +101,7 @@ social_data <- na.omit(social_data)
 
 #Cast dataset back to dataframe 
 social_data <- data.frame(social_data)
-#Make 2nd copy of dataset
-social_data_copy_v2 <- data.frame(social_data)
+
 
 #Get class types of columns 
 class_type <- as.data.frame(sapply(social_data, class))
@@ -130,8 +129,10 @@ nrow(table(social_data$Type)) #Cardinality: 9, keep column
 nrow(table(social_data$Sponsor.Name)) #Cardinality: 5398, keep column
 nrow(table(social_data$train_test)) #Cardinality: 1, drop column
 
-#Keep Page.Created, Post.Created and Post.Created.Time: can perhaps make a feature out of these two columns
+#Make 2nd copy of dataset
+social_data_copy_v2 <- data.frame(social_data)
 
+#Keep Page.Created, Post.Created and Post.Created.Time: can perhaps make a feature out of these two columns
 drop_cols <- c("Facebook.Id","Page.Admin.Top.Country","Page.Description","URL",
                "Message","Link","Sponsor.Id","train_test")
 social_data <- social_data[,!(names(social_data) %in% drop_cols)]
@@ -144,9 +145,13 @@ class_type <- as.data.frame(sapply(social_data, class))
 social_data = social_data %>% 
   mutate_at(vars(Page.Name,User.Name,Page.Category,Type,Sponsor.Name,Sponsor.Category),
             as.factor)
-
+social_data_copy_v2 = social_data_copy_v2 %>% 
+  mutate_at(vars(Page.Name,User.Name,Page.Category,Type,Sponsor.Name,Sponsor.Category),
+            as.factor)
 ##### Get Page.Created into two columns: Page.Created.Date and Page.Created.Time
 social_data = social_data %>%
+  separate(Page.Created, c("Page.Created.Date", "Page.Created.Time"), " ", remove=FALSE)
+social_data_copy_v2 = social_data_copy_v2 %>%
   separate(Page.Created, c("Page.Created.Date", "Page.Created.Time"), " ", remove=FALSE)
 
 
@@ -157,35 +162,50 @@ social_data = social_data %>%
 
 #Create factor variable with day of the week for post created 
 social_data$Post.Created.Day <- weekdays(as.Date(social_data$Post.Created.Date))
+social_data_copy_v2$Post.Created.Day <- weekdays(as.Date(social_data_copy_v2$Post.Created.Date))
 #Create binary column for weekend: 1 if 'Saturday' or 'Sunday', 0 else
 social_data$Post.Created.Weekend <- ifelse((social_data$Post.Created.Day == 'Saturday' |
                                               social_data$Post.Created.Day == 'Sunday' ), 1, 0)
+social_data_copy_v2$Post.Created.Weekend <- ifelse((social_data_copy_v2$Post.Created.Day == 'Saturday' |
+                                                      social_data_copy_v2$Post.Created.Day == 'Sunday' ), 1, 0)
 
 # Create dummy variables based on time intervals
 
 #First cast Post.Created.Time to chron time 
 social_data$Post.Created.Time <- chron(times = social_data$Post.Created.Time)
+social_data_copy_v2$Post.Created.Time <- chron(times = social_data_copy_v2$Post.Created.Time)
 
 #Then: define bins and dummies for those bins
 #Bin 1: from 22:00:01 to 06:00:00 -> Post.Created.TimeNight
 social_data$Post.Created.TimeNight <- ifelse((social_data$Post.Created.Time >= '22:00:01' |
                                                 social_data$Post.Created.Time <= '06:00:00'), 1, 0)
+social_data_copy_v2$Post.Created.TimeNight <- ifelse((social_data_copy_v2$Post.Created.Time >= '22:00:01' |
+                                                        social_data_copy_v2$Post.Created.Time <= '06:00:00'), 1, 0)
 
 #Bin 2: from 06:00:01 to 10:00:00 -> Post.Created.TimeMorning
 social_data$Post.Created.TimeMorning <- ifelse((social_data$Post.Created.Time >= '06:00:01' &
                                                   social_data$Post.Created.Time <= '10:00:00'), 1, 0)
+social_data_copy_v2$Post.Created.TimeMorning <- ifelse((social_data_copy_v2$Post.Created.Time >= '06:00:01' &
+                                                          social_data_copy_v2$Post.Created.Time <= '10:00:00'), 1, 0)
 
 #Bin 3: from 10:00:01 to 14:00:00 -> Post.Created.TimeMidday
 social_data$Post.Created.TimeMidday <- ifelse((social_data$Post.Created.Time >= '10:00:01' &
                                                  social_data$Post.Created.Time <= '14:00:00'), 1, 0)
+social_data_copy_v2$Post.Created.TimeMidday <- ifelse((social_data_copy_v2$Post.Created.Time >= '10:00:01' &
+                                                         social_data_copy_v2$Post.Created.Time <= '14:00:00'), 1, 0)
 
 #Bin 4: from 14:00:01 to 18:00:00 -> Post.Created.TimeAfternoon
 social_data$Post.Created.TimeAfternoon <- ifelse((social_data$Post.Created.Time >= '14:00:01' &
                                                     social_data$Post.Created.Time <= '18:00:00'), 1, 0)
+social_data_copy_v2$Post.Created.TimeAfternoon <- ifelse((social_data_copy_v2$Post.Created.Time >= '14:00:01' &
+                                                            social_data_copy_v2$Post.Created.Time <= '18:00:00'), 1, 0)
 
 #Bin 5: from 18:00:01 to 22:00:00 -> Post.Created.TimeEvening
 social_data$Post.Created.TimeEvening <- ifelse((social_data$Post.Created.Time >= '18:00:01' &
                                                   social_data$Post.Created.Time <= '22:00:00'), 1, 0)
+
+social_data_copy_v2$Post.Created.TimeEvening <- ifelse((social_data_copy_v2$Post.Created.Time >= '18:00:01' &
+                                                          social_data_copy_v2$Post.Created.Time <= '22:00:00'), 1, 0)
 
 
 #Encode high cardinality features using mean encoding
@@ -335,6 +355,7 @@ n <- length(liwc_numhist)
 nCol <- floor(sqrt(n))
 do.call("grid.arrange", c(liwc_numhist, ncol=nCol))
 
+
 ##########################################################################################
 #Feature Engineering and model building
 set.seed(143)
@@ -347,6 +368,10 @@ test_data = test_data[sample(nrow(test_data), 10000), ]
 model_data = train_data[, -c(1,11,12,13,15,16,17,19,20,21,22,23,24,25,26,27,28)]
 model_test = test_data[, -c(1,11,12,13,15,16,17,19,20,21,22,23,24,25,26,27,28)]
 
+#For full datasets
+#model_data = train_data_all[, -c(1,11,12,13,15,16,17,19,20,21,22,23,24,25,26,27,28)]
+#model_test = test_data_all[, -c(1,11,12,13,15,16,17,19,20,21,22,23,24,25,26,27,28)]
+
 # Removing rows with NA if any
 sum(is.na(model_data))
 model_data<-na.omit(model_data)
@@ -358,16 +383,17 @@ model_data <- model_data %>%
 model_test <- model_test %>%
   select(Page.Name,User.Name,Page.Category,Sponsor.Name,Sponsor.Category,Engagement,Type,Post.Created.Day, everything())
 
+
 #################################################################
 # Removing useless features using correlation matrix
 # ensure the results are repeatable
 set.seed(143)
 # calculate correlation matrix
-correlationMatrix <- cor(model_data[,9:123])
+correlationMatrix <- cor(model_data[,9:116])
 # summarize the correlation matrix
 print(correlationMatrix)
 # find attributes that are highly corrected (ideally >0.75)
-highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.50)
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.9)
 # print indexes of highly correlated attributes
 print(highlyCorrelated)
 
@@ -400,6 +426,60 @@ shortlistedVars <- shortlistedVars[!shortlistedVars %in% "(Intercept)"] # remove
 
 # Show
 print(shortlistedVars)
+
+
+######## Model with Short-Listed Vars #########
+#Remove columns that don't exist from shortlistedVars
+shortlist <- shortlistedVars[-c(6:14)]
+
+train_data_shortlist <- subset(model_data, select=shortlist)
+#Add the Type var from model_data
+train_data_shortlist$Type <- model_data$Type
+
+#Change the baseline level for Type to Video
+train_data_shortlist$Type <- as.factor(train_data_shortlist$Type)
+train_data_shortlist <- within(train_data_shortlist, Type <- relevel(Type, ref = "Video"))
+
+model_shortlistvars <- lm(model_data$Engagement ~ hasSponsor*Sponsor.Name_te + . -hasSponsor, data = train_data_shortlist)
+summary(model_shortlistvars)
+
+# Performance check on test dataset
+sapply(model_test, class)
+predictions <- predict(model_shortlistvars, model_test)
+data.frame(R2 = R2(predictions, model_test$Engagement), 
+           RMSE = RMSE(predictions, model_test$Engagement), 
+           MAE = MAE(predictions, model_test$Engagement))
+
+#Get features significant at 10% level
+features.signif <- summary(model_shortlistvars)$coeff[-1,4] < 0.1
+features.all <- names(model_shortlistvars$coefficients)
+features.all <- features.all[-1]
+#Keep only significant features
+features.keep <- features.all[features.signif]
+features.keep <- append(features.keep, "Constant")
+
+
+#Stargazer table
+stargazer(model_shortlistvars, type="html", title="Regression Results",
+          dep.var.labels=c("Effects on Engangement"),
+          omit.stat=c("LL","ser","f"),
+          single.row=TRUE, digits.extra = 2, digits = 2,
+          keep=features.keep,
+          covariate.labels=c("Sponsor Name Encoded","Post views", "Total views",
+                             "Total Views for all Crossposts", "User Name Encoded",
+                             "Interrogatives","Dashes","Male","Sponsor Category Encoded",
+                             "2nd Person", "Impersonal Pronouns",
+                             "Question Marks","Total function words", "Future focus",
+                             "Money","Post Created at Night","Reward", "Positive emotion",
+                             "All Punctuation","Swear words","Power","Anger","Nonfluencies",
+                             "Parentheses","Work","Leisure","Body","3rd person singular","Female References",
+                             "Quantifiers","See","Achievement","Risk","Emotional Tone",
+                             "Conjunctions",
+                             "Type: Live Video Complete","Type: Native Video",
+                             "Sponsor Name Encoded * hasSponsor", "Intercept"
+          )
+          )
+
 
 ###############################################################################
 model_final <- lm(Engagement ~ Post.Views 
@@ -477,3 +557,116 @@ ggplot(df2, aes(y=sponsor, x=Type)) +
   xlab("Types")+ theme_bw() +
   theme(plot.title = element_text(hjust = 0.5))
 
+########### Q3 & Q4 ##################
+
+#Power users
+#Make copy of train_data_all with only columns: User.Name, User.Name_te and Engagement
+user_data <- train_data_all[,c("User.Name","User.Name_te","Engagement")]
+#Rename users != CollegeHumor & Insider to 'Other'
+user_data$User.Name[((user_data$User.Name != "CollegeHumor") & (user_data$User.Name != "insider"))] <- 'Other'
+
+#
+gg.user.avg_engagement <- ggplot(user_data) +
+  geom_bar(aes(y=Engagement, x = User.Name, fill = User.Name ),
+           position = 'dodge', stat = 'summary', fun="mean") +
+  ylab("Mean Engagement") +
+  xlab("User Name")
+gg.user.avg_engagement
+
+gg.user.sum_engagement <- ggplot(user_data) +
+  geom_bar(aes(y=Engagement, x = User.Name, fill = User.Name ),
+           position = 'dodge', stat = 'summary', fun="sum") +
+  ylab("Total Engagement") +
+  xlab("User Name")
+gg.user.sum_engagement
+
+grid.arrange(gg.user.avg_engagement,gg.user.sum_engagement, ncol=2)
+
+#Graph for Type
+gg.type.avg_engagement <- ggplot(train_data_all) + 
+  geom_bar(aes(y=Engagement, x = Type, fill=Type),
+           position = 'dodge', stat = 'summary', fun='mean') +
+  ylab("Mean Engagement") +
+  xlab("Type of Post") +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+gg.type.avg_engagement
+
+gg.type.sum_engagement <- ggplot(train_data_all) + 
+  geom_bar(aes(y=Engagement, x = Type, fill=Type),
+           position = 'dodge', stat = 'summary', fun='sum') +
+  ylab("Total Engagemen") +
+  xlab("Type of Post") +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+gg.type.sum_engagement
+
+grid.arrange(gg.type.avg_engagement,gg.type.sum_engagement)
+
+#SCatter plot for Username encoded var and engagement
+scatterplot(Engagement~User.Name_te, data=train_data_all)
+
+#### Recommendations for page 'People'
+complete_data_people <- social_data_copy_v2[social_data_copy_v2$Page.Name == "People",]
+#Get a binary column is_people 
+train_data_all$is_people <- ifelse(train_data_all$Page.Name == "People",1,0)
+#SCatter plot for second person pronounds  and log(engagement)
+gg.all_you <- ggplot(train_data_all, aes(y=log1p(Engagement), x=log1p(you))) +
+  geom_point(aes(color = factor(is_people))) +
+  stat_smooth(method = "lm",
+              col = "#C42126",
+              se = FALSE,
+              size = 1)
+gg.all_you
+
+#Get a factor column for time bin
+complete_data_people$Post.Created.TimeFactor <- 0
+complete_data_people$Post.Created.TimeFactor <- ifelse(complete_data_people$Post.Created.TimeNight, 
+                                                       'Night',complete_data_people$Post.Created.TimeFactor)
+complete_data_people$Post.Created.TimeFactor <- ifelse(complete_data_people$Post.Created.TimeMorning, 
+                                                       'Morning',complete_data_people$Post.Created.TimeFactor)
+complete_data_people$Post.Created.TimeFactor <- ifelse(complete_data_people$Post.Created.TimeMidday, 
+                                                       'Midday',complete_data_people$Post.Created.TimeFactor)
+complete_data_people$Post.Created.TimeFactor <- ifelse(complete_data_people$Post.Created.TimeAfternoon, 
+                                                       'Afternoon',complete_data_people$Post.Created.TimeFactor)
+complete_data_people$Post.Created.TimeFactor <- ifelse(complete_data_people$Post.Created.TimeEvening, 
+                                                       'Evening',complete_data_people$Post.Created.TimeFactor)
+
+gg.people_time <- ggplot(complete_data_people, aes(y=log1p(Engagement), x=log1p(you))) +
+  geom_point(aes(color = factor(Post.Created.TimeFactor)))
+gg.people_time
+
+#Median engagement by time
+#Count number of posts per time
+people.count_time <- data.frame(sort(table(complete_data_people$Post.Created.TimeFactor)))
+
+gg.people.avg_engagement <- ggplot(complete_data_people) + 
+  geom_bar(aes(y=Engagement, x = Post.Created.TimeFactor, fill=Post.Created.TimeFactor),
+           position = 'dodge', stat = 'summary', fun='mean') +
+  ylab("Mean Engagement") +
+  xlab("Time of Posting") +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) + 
+  geom_text(data = people.count_time, aes(x=Var1, y=20, label=paste("n =",Freq,"\n"))) +
+  guides(fill=guide_legend(title="Post Created During:"))
+gg.people.avg_engagement
+
+gg.people.median_engagement <- ggplot(complete_data_people) + 
+  geom_bar(aes(y=Engagement, x = Post.Created.TimeFactor, fill=Post.Created.TimeFactor),
+           position = 'dodge', stat = 'summary', fun='median') +
+  ylab("Median Engagement") +
+  xlab("Time of Posting") +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) + 
+  geom_text(data = people.count_time, aes(x=Var1, y=20, label=paste("n =",Freq,"\n")))+
+  guides(fill=guide_legend(title="Post Created During:"))
+gg.people.median_engagement
+
+grid.arrange(gg.people.avg_engagement, gg.people.median_engagement)
+
+#Get number of posts they do by type
+sort(table(complete_data_people$Type))
+
+gg.people_type <- ggplot(complete_data_people[(complete_data_people$Engagement<=25000 & complete_data_people$Total.Views<=1000000) ,], aes(y=Engagement, x=Total.Views)) +
+  geom_point(aes(color = factor(Type)))
+gg.people_type
+
+#Get average and median for sponsored/not sponsored
+people.avg_sponsored <- aggregate(complete_data_people$Engagement, list(complete_data_people$hasSponsor), mean)
+people.median_sponsored <- aggregate(complete_data_people$Engagement, list(complete_data_people$hasSponsor), median)
